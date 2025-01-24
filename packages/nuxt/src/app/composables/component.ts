@@ -16,7 +16,7 @@ async function runLegacyAsyncData (res: Record<string, any> | Promise<Record<str
   const { fetchKey, _fetchKeyBase } = vm.proxy!.$options
   const key = (typeof fetchKey === 'function' ? fetchKey(() => '') : fetchKey) ||
     ([_fetchKeyBase, route.fullPath, route.matched.findIndex(r => Object.values(r.components || {}).includes(vm.type))].join(':'))
-  const { data, error } = await useAsyncData(`options:asyncdata:${key}`, () => nuxtApp.runWithContext(() => fn(nuxtApp)))
+  const { data, error } = await useAsyncData(`options:asyncdata:${key}`, () => import.meta.server ? nuxtApp.runWithContext(() => fn(nuxtApp)) : fn(nuxtApp))
   if (error.value) {
     throw createError(error.value)
   }
@@ -38,7 +38,7 @@ export const defineNuxtComponent: typeof defineComponent =
     if (!setup && !options.asyncData && !options.head) {
       return {
         [NuxtComponentIndicator]: true,
-        ...options
+        ...options,
       }
     }
 
@@ -56,7 +56,6 @@ export const defineNuxtComponent: typeof defineComponent =
         }
 
         if (options.head) {
-          const nuxtApp = useNuxtApp()
           useHead(typeof options.head === 'function' ? () => options.head(nuxtApp) : options.head)
         }
 
@@ -66,6 +65,6 @@ export const defineNuxtComponent: typeof defineComponent =
           .finally(() => {
             promises.length = 0
           })
-      }
+      },
     } as DefineComponent
   }

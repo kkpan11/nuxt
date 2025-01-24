@@ -6,7 +6,7 @@ import { reactive, ref, shallowReactive, shallowRef } from 'vue'
 import { createError } from 'h3'
 import { getBrowser, url, useTestContext } from '@nuxt/test-utils/e2e'
 
-export const isRenderingJson = true
+export const isRenderingJson = process.env.TEST_PAYLOAD !== 'js'
 
 export async function renderPage (path = '/') {
   const ctx = useTestContext()
@@ -23,7 +23,7 @@ export async function renderPage (path = '/') {
   page.on('console', (message) => {
     consoleLogs.push({
       type: message.type(),
-      text: message.text()
+      text: message.text(),
     })
   })
   page.on('pageerror', (err) => {
@@ -32,7 +32,7 @@ export async function renderPage (path = '/') {
   page.on('request', (req) => {
     try {
       requests.push(req.url().replace(url('/'), '/'))
-    } catch (err) {
+    } catch {
       // TODO
     }
   })
@@ -45,7 +45,7 @@ export async function renderPage (path = '/') {
     page,
     pageErrors,
     requests,
-    consoleLogs
+    consoleLogs,
   }
 }
 
@@ -57,14 +57,18 @@ export async function expectNoClientErrors (path: string) {
 
   const { page, pageErrors, consoleLogs } = (await renderPage(path))!
 
+  expect(pageErrors).toEqual([])
+  expectNoErrorsOrWarnings(consoleLogs)
+
+  await page.close()
+}
+
+export function expectNoErrorsOrWarnings (consoleLogs: Array<{ type: string, text: string }>) {
   const consoleLogErrors = consoleLogs.filter(i => i.type === 'error')
   const consoleLogWarnings = consoleLogs.filter(i => i.type === 'warning')
 
-  expect(pageErrors).toEqual([])
   expect(consoleLogErrors).toEqual([])
   expect(consoleLogWarnings).toEqual([])
-
-  await page.close()
 }
 
 export async function gotoPath (page: Page, path: string) {
@@ -77,7 +81,7 @@ export async function expectWithPolling (
   get: () => Promise<EqualityVal> | EqualityVal,
   expected: EqualityVal,
   retries = process.env.CI ? 100 : 30,
-  delay = process.env.CI ? 500 : 100
+  delay = process.env.CI ? 500 : 100,
 ) {
   let result: EqualityVal
   for (let i = retries; i >= 0; i--) {
@@ -100,27 +104,29 @@ const revivers = {
   Ref: (data: any) => ref(data),
   Reactive: (data: any) => reactive(data),
   // test fixture reviver only
-  BlinkingText: () => '<revivified-blink>'
+  BlinkingText: () => '<revivified-blink>',
 }
 export function parsePayload (payload: string) {
   return parse(payload || '', revivers)
 }
 export function parseData (html: string) {
   if (!isRenderingJson) {
-    const { script } = html.match(/<script>(?<script>window.__NUXT__.*?)<\/script>/)?.groups || {}
+    const { script = '' } = html.match(/<script>(?<script>window.__NUXT__.*?)<\/script>/)?.groups || {}
     const _script = new Script(script)
     return {
       script: _script.runInContext(createContext({ window: {} })),
-      attrs: {}
+      attrs: {},
     }
   }
-  const { script, attrs } = html.match(/<script type="application\/json" id="__NUXT_DATA__"(?<attrs>[^>]+)>(?<script>.*?)<\/script>/)?.groups || {}
+
+  const regexp = /<script type="application\/json" data-nuxt-data="[^"]+"(?<attrs>[^>]+)>(?<script>.*?)<\/script>/
+  const { script, attrs = '' } = html.match(regexp)?.groups || {}
   const _attrs: Record<string, string> = {}
-  for (const attr of attrs.matchAll(/( |^)(?<key>[\w-]+)+="(?<value>[^"]+)"/g)) {
-    _attrs[attr!.groups!.key] = attr!.groups!.value
+  for (const attr of attrs.matchAll(/( |^)(?<key>[\w-]+)="(?<value>[^"]+)"/g)) {
+    _attrs[attr!.groups!.key!] = attr!.groups!.value!
   }
   return {
     script: parsePayload(script || ''),
-    attrs: _attrs
+    attrs: _attrs,
   }
 }

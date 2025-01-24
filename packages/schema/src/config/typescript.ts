@@ -20,10 +20,10 @@ export default defineUntypedSchema({
      * builder environment types (with `false`) to handle this fully yourself, or opt for a 'shared' option.
      *
      * The 'shared' option is advised for module authors, who will want to support multiple possible builders.
-     * @type {'vite' | 'webpack' | 'shared' | false | undefined}
+     * @type {'vite' | 'webpack' | 'rspack' | 'shared' | false | undefined}
      */
     builder: {
-      $resolve: val => val ?? null
+      $resolve: val => val ?? null,
     },
 
     /**
@@ -32,9 +32,28 @@ export default defineUntypedSchema({
      */
     hoist: {
       $resolve: (val) => {
-        const defaults = ['nitropack', 'defu', 'h3', '@unhead/vue', 'vue', 'vue-router', '@nuxt/schema']
+        const defaults = [
+          // Nitro auto-imported/augmented dependencies
+          'nitro/types',
+          'nitro/runtime',
+          'defu',
+          'h3',
+          'consola',
+          'ofetch',
+          // Key nuxt dependencies
+          '@unhead/vue',
+          '@nuxt/devtools',
+          'vue',
+          '@vue/runtime-core',
+          '@vue/compiler-sfc',
+          'vue-router',
+          'vue-router/auto-routes',
+          'unplugin-vue-router/client',
+          '@nuxt/schema',
+          'nuxt',
+        ]
         return val === false ? [] : (Array.isArray(val) ? val.concat(defaults) : defaults)
-      }
+      },
     },
 
     /**
@@ -47,14 +66,14 @@ export default defineUntypedSchema({
      *
      * If set to true, this will type check in development. You can restrict this to build-time type checking by setting it to `build`.
      * Requires to install `typescript` and `vue-tsc` as dev dependencies.
-     * @see https://nuxt.com/docs/guide/concepts/typescript
+     * @see [Nuxt TypeScript docs](https://nuxt.com/docs/guide/concepts/typescript)
      * @type {boolean | 'build'}
      */
     typeCheck: false,
 
     /**
      * You can extend generated `.nuxt/tsconfig.json` using this option.
-     * @type {0 extends 1 & VueCompilerOptions ? typeof import('pkg-types')['TSConfig'] : typeof import('pkg-types')['TSConfig'] & { vueCompilerOptions?: typeof import('@vue/language-core')['VueCompilerOptions']}}
+     * @type {0 extends 1 & VueCompilerOptions ? typeof import('pkg-types')['TSConfig'] : typeof import('pkg-types')['TSConfig'] & { vueCompilerOptions?: Omit<typeof import('@vue/language-core')['VueCompilerOptions'], 'plugins'> & { plugins?: string[] } }}
      */
     tsConfig: {},
 
@@ -63,7 +82,10 @@ export default defineUntypedSchema({
      *
      * We recommend instead letting the [official Vue extension](https://marketplace.visualstudio.com/items?itemName=Vue.volar)
      * generate accurate types for your components.
+     *
+     * Note that you may wish to set this to `true` if you are using other libraries, such as ESLint,
+     * that are unable to understand the type of `.vue` files.
      */
-    shim: false
-  }
+    shim: false,
+  },
 })

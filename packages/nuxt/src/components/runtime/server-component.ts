@@ -1,4 +1,4 @@
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, getCurrentInstance, h, ref } from 'vue'
 import NuxtIsland from '#app/components/nuxt-island'
 import { useRoute } from '#app/composables/router'
 import { isPrerendered } from '#app/composables/payload'
@@ -11,10 +11,11 @@ export const createServerComponent = (name: string) => {
     props: { lazy: Boolean },
     emits: ['error'],
     setup (props, { attrs, slots, expose, emit }) {
+      const vm = getCurrentInstance()
       const islandRef = ref<null | typeof NuxtIsland>(null)
 
       expose({
-        refresh: () => islandRef.value?.refresh()
+        refresh: () => islandRef.value?.refresh(),
       })
 
       return () => {
@@ -22,13 +23,14 @@ export const createServerComponent = (name: string) => {
           name,
           lazy: props.lazy,
           props: attrs,
+          scopeId: vm?.vnode.scopeId,
           ref: islandRef,
           onError: (err) => {
             emit('error', err)
-          }
+          },
         }, slots)
       }
-    }
+    },
   })
 }
 
@@ -42,7 +44,7 @@ export const createIslandPage = (name: string) => {
       const islandRef = ref<null | typeof NuxtIsland>(null)
 
       expose({
-        refresh: () => islandRef.value?.refresh()
+        refresh: () => islandRef.value?.refresh(),
       })
 
       const route = useRoute()
@@ -54,10 +56,10 @@ export const createIslandPage = (name: string) => {
             name: `page:${name}`,
             lazy: props.lazy,
             ref: islandRef,
-            context: { url: path }
-          }, slots)
+            context: { url: path },
+          }, slots),
         ])
       }
-    }
+    },
   })
 }

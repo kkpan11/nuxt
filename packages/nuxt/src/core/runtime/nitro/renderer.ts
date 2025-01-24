@@ -4,9 +4,10 @@ import {
   getPrefetchLinks,
   getPreloadLinks,
   getRequestDependencies,
-  renderResourceHeaders
+  renderResourceHeaders,
 } from 'vue-bundle-renderer/runtime'
-import type { RenderResponse } from 'nitropack'
+import type { Manifest as ClientManifest } from 'vue-bundle-renderer'
+import type { RenderResponse } from 'nitro/types'
 import type { Manifest } from 'vite'
 import type { H3Event } from 'h3'
 import { appendResponseHeader, createError, getQuery, getResponseStatus, getResponseStatusText, readBody, writeEarlyHints } from 'h3'
@@ -15,23 +16,23 @@ import { stringify, uneval } from 'devalue'
 import destr from 'destr'
 import { getQuery as getURLQuery, joinURL, withoutTrailingSlash } from 'ufo'
 import { renderToString as _renderToString } from 'vue/server-renderer'
-import { hash } from 'ohash'
-import { renderSSRHead } from '@unhead/ssr'
-import type { HeadEntryOptions } from '@unhead/schema'
+import { propsToString, renderSSRHead } from '@unhead/ssr'
+import type { Head, HeadEntryOptions } from '@unhead/schema'
 import type { Link, Script, Style } from '@unhead/vue'
-import { createServerHead } from '@unhead/vue'
+import { createServerHead, resolveUnrefHeadInput } from '@unhead/vue'
 
-import { defineRenderHandler, getRouteRules, useRuntimeConfig, useStorage } from '#internal/nitro'
-import { useNitroApp } from '#internal/nitro/app'
+import { defineRenderHandler, getRouteRules, useNitroApp, useRuntimeConfig, useStorage } from 'nitro/runtime'
+import type { NuxtPayload, NuxtSSRContext } from 'nuxt/app'
 
 // @ts-expect-error virtual file
 import unheadPlugins from '#internal/unhead-plugins.mjs'
-// eslint-disable-next-line import/no-restricted-paths
-import type { NuxtPayload, NuxtSSRContext } from '#app'
 // @ts-expect-error virtual file
-import { appHead, appRootId, appRootTag, appTeleportId, appTeleportTag, componentIslands } from '#internal/nuxt.config.mjs'
+import { renderSSRHeadOptions } from '#internal/unhead.config.mjs'
+
 // @ts-expect-error virtual file
-import { buildAssetsURL, publicAssetsURL } from '#paths'
+import { appHead, appId, appRootAttrs, appRootTag, appSpaLoaderAttrs, appSpaLoaderTag, appTeleportAttrs, appTeleportTag, componentIslands, appManifest as isAppManifestEnabled, multiApp, spaLoadingTemplateOutside } from '#internal/nuxt.config.mjs'
+// @ts-expect-error virtual file
+import { buildAssetsURL, publicAssetsURL } from '#internal/nuxt/paths'
 
 // @ts-expect-error private property consumed by vite-generated url helpers
 globalThis.__buildAssetsURL = buildAssetsURL
@@ -77,24 +78,18 @@ export interface NuxtIslandContext {
 export interface NuxtIslandResponse {
   id?: string
   html: string
-  state: Record<string, any>
-  head: {
-    link: (Record<string, string>)[]
-    style: ({ innerHTML: string, key: string })[]
-  }
+  head: Head
   props?: Record<string, Record<string, any>>
   components?: Record<string, NuxtIslandClientResponse>
   slots?: Record<string, NuxtIslandSlotResponse>
 }
 
 export interface NuxtRenderResponse {
-  body: string,
-  statusCode: number,
-  statusMessage?: string,
+  body: string
+  statusCode: number
+  statusMessage?: string
   headers: Record<string, string>
 }
-
-interface ClientManifest {}
 
 // @ts-expect-error file will be produced after app build
 const getClientManifest: () => Promise<Manifest> = () => import('#build/dist/server/client.manifest.mjs')
@@ -103,7 +98,7 @@ const getClientManifest: () => Promise<Manifest> = () => import('#build/dist/ser
 
 const getEntryIds: () => Promise<string[]> = () => getClientManifest().then(r => Object.values(r).filter(r =>
   // @ts-expect-error internal key set by CSS inlining configuration
-  r._globalCSS
+  r._globalCSS,
 ).map(r => r.src!))
 
 // @ts-expect-error file will be produced after app build
@@ -125,7 +120,7 @@ const getSSRRenderer = lazyCachedFunction(async () => {
   const options = {
     manifest,
     renderToString,
-    buildAssetsURL
+    buildAssetsURL,
   }
   // Create renderer
   const renderer = createRenderer(createSSRApp, options)
@@ -149,12 +144,22 @@ const getSPARenderer = lazyCachedFunction(async () => {
 
   // @ts-expect-error virtual file
   const spaTemplate = await import('#spa-template').then(r => r.template).catch(() => '')
-    .then(r => APP_ROOT_OPEN_TAG + r + APP_ROOT_CLOSE_TAG)
+    .then((r) => {
+      if (spaLoadingTemplateOutside) {
+        const APP_SPA_LOADER_OPEN_TAG = `<${appSpaLoaderTag}${propsToString(appSpaLoaderAttrs)}>`
+        const APP_SPA_LOADER_CLOSE_TAG = `</${appSpaLoaderTag}>`
+        const appTemplate = APP_ROOT_OPEN_TAG + APP_ROOT_CLOSE_TAG
+        const loaderTemplate = r ? APP_SPA_LOADER_OPEN_TAG + r + APP_SPA_LOADER_CLOSE_TAG : ''
+        return appTemplate + loaderTemplate
+      } else {
+        return APP_ROOT_OPEN_TAG + r + APP_ROOT_CLOSE_TAG
+      }
+    })
 
   const options = {
     manifest,
     renderToString: () => spaTemplate,
-    buildAssetsURL
+    buildAssetsURL,
   }
   // Create SPA renderer and cache the result for all requests
   const renderer = createRenderer(() => () => {}, options)
@@ -163,23 +168,17 @@ const getSPARenderer = lazyCachedFunction(async () => {
   const renderToString = (ssrContext: NuxtSSRContext) => {
     const config = useRuntimeConfig(ssrContext.event)
     ssrContext.modules = ssrContext.modules || new Set<string>()
-    ssrContext!.payload = {
-      _errors: {},
-      serverRendered: false,
-      data: {},
-      state: {},
-      once: new Set<string>()
-    }
+    ssrContext.payload.serverRendered = false
     ssrContext.config = {
       public: config.public,
-      app: config.app
+      app: config.app,
     }
     return Promise.resolve(result)
   }
 
   return {
     rendererContext: renderer.rendererContext,
-    renderToString
+    renderToString,
   }
 })
 
@@ -197,14 +196,15 @@ const sharedPrerenderCache = import.meta.prerender && process.env.NUXT_SHARED_DA
       },
       async set<T> (key: string, value: Promise<T>): Promise<void> {
         sharedPrerenderKeys.add(key)
-      sharedPrerenderPromises!.set(key, value)
-      useStorage('internal:nuxt:prerender:shared').setItem(key, await value as any)
+        sharedPrerenderPromises!.set(key, value)
+        useStorage('internal:nuxt:prerender:shared').setItem(key, await value as any)
         // free up memory after the promise is resolved
-        .finally(() => sharedPrerenderPromises!.delete(key))
-      }
+          .finally(() => sharedPrerenderPromises!.delete(key))
+      },
     }
   : null
 
+const ISLAND_SUFFIX_RE = /\.json(\?.*)?$/
 async function getIslandContext (event: H3Event): Promise<NuxtIslandContext> {
   // TODO: Strict validation for url
   let url = event.path || ''
@@ -212,8 +212,9 @@ async function getIslandContext (event: H3Event): Promise<NuxtIslandContext> {
     // rehydrate props from cache so we can rerender island if cache does not have it any more
     url = await islandPropCache!.getItem(event.path) as string
   }
-  url = url.substring('/__nuxt_island'.length + 1) || ''
-  const [componentName, hashId] = url.split('?')[0].replace(/\.json$/, '').split('_')
+  const componentParts = url.substring('/__nuxt_island'.length + 1).replace(ISLAND_SUFFIX_RE, '').split('_')
+  const hashId = componentParts.length > 1 ? componentParts.pop() : undefined
+  const componentName = componentParts.join('_')
 
   // TODO: Validate context
   const context = event.method === 'GET' ? getQuery(event) : await readBody(event)
@@ -225,21 +226,21 @@ async function getIslandContext (event: H3Event): Promise<NuxtIslandContext> {
     name: componentName,
     props: destr(context.props) || {},
     slots: {},
-    components: {}
+    components: {},
   }
 
   return ctx
 }
 
-const HAS_APP_TELEPORTS = !!(appTeleportTag && appTeleportId)
-const APP_TELEPORT_OPEN_TAG = HAS_APP_TELEPORTS ? `<${appTeleportTag} id="${appTeleportId}">` : ''
+const HAS_APP_TELEPORTS = !!(appTeleportTag && appTeleportAttrs.id)
+const APP_TELEPORT_OPEN_TAG = HAS_APP_TELEPORTS ? `<${appTeleportTag}${propsToString(appTeleportAttrs)}>` : ''
 const APP_TELEPORT_CLOSE_TAG = HAS_APP_TELEPORTS ? `</${appTeleportTag}>` : ''
 
-const APP_ROOT_OPEN_TAG = `<${appRootTag}${appRootId ? ` id="${appRootId}"` : ''}>`
+const APP_ROOT_OPEN_TAG = `<${appRootTag}${propsToString(appRootAttrs)}>`
 const APP_ROOT_CLOSE_TAG = `</${appRootTag}>`
 
 const PAYLOAD_URL_RE = process.env.NUXT_JSON_PAYLOADS ? /\/_payload.json(\?.*)?$/ : /\/_payload.js(\?.*)?$/
-const ROOT_NODE_REGEX = new RegExp(`^${APP_ROOT_OPEN_TAG}([\\s\\S]*)${APP_ROOT_CLOSE_TAG}$`)
+const ROOT_NODE_REGEX = new RegExp(`^<${appRootTag}[^>]*>([\\s\\S]*)<\\/${appRootTag}>$`)
 
 const PRERENDER_NO_SSR_ROUTES = new Set(['/index.html', '/200.html', '/404.html'])
 
@@ -252,13 +253,13 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
     : null
 
   if (ssrError && ssrError.statusCode) {
-    ssrError.statusCode = parseInt(ssrError.statusCode as any)
+    ssrError.statusCode = Number.parseInt(ssrError.statusCode as any)
   }
 
   if (ssrError && !('__unenv__' in event.node.req) /* allow internal fetch */) {
     throw createError({
       statusCode: 404,
-      statusMessage: 'Page Not Found: /__nuxt_error'
+      statusMessage: 'Page Not Found: /__nuxt_error',
     })
   }
 
@@ -289,8 +290,9 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
   const routeOptions = getRouteRules(event)
 
   const head = createServerHead({
-    plugins: unheadPlugins
+    plugins: unheadPlugins,
   })
+
   // needed for hash hydration plugin to work
   const headEntryOptions: HeadEntryOptions = { mode: 'server' }
   if (!isRenderingIsland) {
@@ -311,11 +313,9 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
     error: !!ssrError,
     nuxt: undefined!, /* NuxtApp */
     payload: (ssrError ? { error: ssrError } : {}) as NuxtPayload,
-    _payloadReducers: {},
+    _payloadReducers: Object.create(null),
     modules: new Set(),
-    set _registeredComponents (value) { this.modules = value },
-    get _registeredComponents () { return this.modules },
-    islandContext
+    islandContext,
   }
 
   if (import.meta.prerender && process.env.NUXT_SHARED_DATA) {
@@ -324,7 +324,7 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
 
   // Whether we are prerendering route
   const _PAYLOAD_EXTRACTION = import.meta.prerender && process.env.NUXT_PAYLOAD_EXTRACTION && !ssrContext.noSSR && !isRenderingIsland
-  const payloadURL = _PAYLOAD_EXTRACTION ? joinURL(ssrContext.runtimeConfig.app.baseURL, url, process.env.NUXT_JSON_PAYLOADS ? '_payload.json' : '_payload.js') : undefined
+  const payloadURL = _PAYLOAD_EXTRACTION ? joinURL(ssrContext.runtimeConfig.app.cdnURL || ssrContext.runtimeConfig.app.baseURL, url, process.env.NUXT_JSON_PAYLOADS ? '_payload.json' : '_payload.js') + '?' + ssrContext.runtimeConfig.app.buildId : undefined
   if (import.meta.prerender) {
     ssrContext.payload.prerenderedAt = Date.now()
   }
@@ -335,7 +335,9 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
   // Render 103 Early Hints
   if (process.env.NUXT_EARLY_HINTS && !isRenderingPayload && !import.meta.prerender) {
     const { link } = renderResourceHeaders({}, renderer.rendererContext)
-    writeEarlyHints(event, link)
+    if (link) {
+      writeEarlyHints(event, link)
+    }
   }
 
   if (process.env.NUXT_INLINE_STYLES && !isRenderingIsland) {
@@ -387,23 +389,30 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
 
   // Setup head
   const { styles, scripts } = getRequestDependencies(ssrContext, renderer.rendererContext)
-  // 1.Extracted payload preloading
-  if (_PAYLOAD_EXTRACTION && !isRenderingIsland) {
+  // 1. Preload payloads and app manifest
+  if (_PAYLOAD_EXTRACTION && !NO_SCRIPTS && !isRenderingIsland) {
     head.push({
       link: [
         process.env.NUXT_JSON_PAYLOADS
           ? { rel: 'preload', as: 'fetch', crossorigin: 'anonymous', href: payloadURL }
-          : { rel: 'modulepreload', href: payloadURL }
-      ]
+          : { rel: 'modulepreload', crossorigin: '', href: payloadURL },
+      ],
     }, headEntryOptions)
   }
-
+  if (isAppManifestEnabled && ssrContext._preloadManifest) {
+    head.push({
+      link: [
+        { rel: 'preload', as: 'fetch', fetchpriority: 'low', crossorigin: 'anonymous', href: buildAssetsURL(`builds/meta/${ssrContext.runtimeConfig.app.buildId}.json`) },
+      ],
+    }, { ...headEntryOptions, tagPriority: 'low' })
+  }
   // 2. Styles
-  head.push({ style: inlinedStyles })
+  if (inlinedStyles.length) {
+    head.push({ style: inlinedStyles })
+  }
   if (!isRenderingIsland || import.meta.dev) {
-    const link = []
-    for (const style in styles) {
-      const resource = styles[style]
+    const link: Link[] = []
+    for (const resource of Object.values(styles)) {
       // Do not add links to resources that are inlined (vite v5+)
       if (import.meta.dev && 'inline' in getURLQuery(resource.file)) {
         continue
@@ -413,35 +422,37 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
       // - in dev mode when not rendering an island
       // - in dev mode when rendering an island and the file has scoped styles and is not a page
       if (!import.meta.dev || !isRenderingIsland || (resource.file.includes('scoped') && !resource.file.includes('pages/'))) {
-        link.push({ rel: 'stylesheet', href: renderer.rendererContext.buildAssetsURL(resource.file) })
+        link.push({ rel: 'stylesheet', href: renderer.rendererContext.buildAssetsURL(resource.file), crossorigin: '' })
       }
     }
-    head.push({ link }, headEntryOptions)
+    if (link.length) {
+      head.push({ link }, headEntryOptions)
+    }
   }
 
   if (!NO_SCRIPTS && !isRenderingIsland) {
     // 3. Resource Hints
     // TODO: add priorities based on Capo
     head.push({
-      link: getPreloadLinks(ssrContext, renderer.rendererContext) as Link[]
+      link: getPreloadLinks(ssrContext, renderer.rendererContext) as Link[],
     }, headEntryOptions)
     head.push({
-      link: getPrefetchLinks(ssrContext, renderer.rendererContext) as Link[]
+      link: getPrefetchLinks(ssrContext, renderer.rendererContext) as Link[],
     }, headEntryOptions)
     // 4. Payloads
     head.push({
       script: _PAYLOAD_EXTRACTION
         ? process.env.NUXT_JSON_PAYLOADS
-          ? renderPayloadJsonScript({ id: '__NUXT_DATA__', ssrContext, data: splitPayload(ssrContext).initial, src: payloadURL })
+          ? renderPayloadJsonScript({ ssrContext, data: splitPayload(ssrContext).initial, src: payloadURL })
           : renderPayloadScript({ ssrContext, data: splitPayload(ssrContext).initial, src: payloadURL })
         : process.env.NUXT_JSON_PAYLOADS
-          ? renderPayloadJsonScript({ id: '__NUXT_DATA__', ssrContext, data: ssrContext.payload })
-          : renderPayloadScript({ ssrContext, data: ssrContext.payload })
+          ? renderPayloadJsonScript({ ssrContext, data: ssrContext.payload })
+          : renderPayloadScript({ ssrContext, data: ssrContext.payload }),
     }, {
       ...headEntryOptions,
       // this should come before another end of body scripts
       tagPosition: 'bodyClose',
-      tagPriority: 'high'
+      tagPriority: 'high',
     })
   }
 
@@ -452,51 +463,40 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
         type: resource.module ? 'module' : null,
         src: renderer.rendererContext.buildAssetsURL(resource.file),
         defer: resource.module ? null : true,
-        crossorigin: ''
-      }))
+        // if we are rendering script tag payloads that import an async payload
+        // we need to ensure this resolves before executing the Nuxt entry
+        tagPosition: (_PAYLOAD_EXTRACTION && !process.env.NUXT_JSON_PAYLOADS) ? 'bodyClose' : 'head',
+        crossorigin: '',
+      })),
     }, headEntryOptions)
   }
 
   // remove certain tags for nuxt islands
-  const { headTags, bodyTags, bodyTagsOpen, htmlAttrs, bodyAttrs } = await renderSSRHead(head)
-
-  // Create render context
-  const htmlContext: NuxtRenderHTMLContext = {
-    island: isRenderingIsland,
-    htmlAttrs: htmlAttrs ? [htmlAttrs] : [],
-    head: normalizeChunks([headTags, ssrContext.styles]),
-    bodyAttrs: bodyAttrs ? [bodyAttrs] : [],
-    bodyPrepend: normalizeChunks([bodyTagsOpen, ssrContext.teleports?.body]),
-    body: [
-      componentIslands ? replaceIslandTeleports(ssrContext, _rendered.html) : _rendered.html,
-      APP_TELEPORT_OPEN_TAG + (HAS_APP_TELEPORTS ? joinTags([ssrContext.teleports?.[`#${appTeleportId}`]]) : '') + APP_TELEPORT_CLOSE_TAG
-    ],
-    bodyAppend: [bodyTags]
-  }
-
-  // Allow hooking into the rendered result
-  await nitroApp.hooks.callHook('render:html', htmlContext, { event })
+  const { headTags, bodyTags, bodyTagsOpen, htmlAttrs, bodyAttrs } = await renderSSRHead(head, renderSSRHeadOptions)
 
   // Response for component islands
   if (isRenderingIsland && islandContext) {
-    const islandHead: NuxtIslandResponse['head'] = {
-      link: [],
-      style: []
-    }
-    for (const tag of await head.resolveTags()) {
-      if (tag.tag === 'link') {
-        islandHead.link.push({ key: 'island-link-' + hash(tag.props), ...tag.props })
-      } else if (tag.tag === 'style' && tag.innerHTML) {
-        islandHead.style.push({ key: 'island-style-' + hash(tag.innerHTML), innerHTML: tag.innerHTML })
+    const islandHead: Head = {}
+    for (const entry of head.headEntries()) {
+      for (const [key, value] of Object.entries(resolveUnrefHeadInput(entry.input) as Head)) {
+        const currentValue = islandHead[key as keyof Head]
+        if (Array.isArray(currentValue)) {
+          currentValue.push(...value)
+        }
+        islandHead[key as keyof Head] = value
       }
     }
+
+    // TODO: remove for v4
+    islandHead.link ||= []
+    islandHead.style ||= []
+
     const islandResponse: NuxtIslandResponse = {
       id: islandContext.id,
       head: islandHead,
-      html: getServerComponentHTML(htmlContext.body),
-      state: ssrContext.payload.state,
+      html: getServerComponentHTML(_rendered.html),
       components: getClientIslandResponse(ssrContext),
-      slots: getSlotIslandResponse(ssrContext)
+      slots: getSlotIslandResponse(ssrContext),
     }
 
     await nitroApp.hooks.callHook('render:island', islandResponse, { event, islandContext })
@@ -507,8 +507,8 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
       statusMessage: getResponseStatusText(event),
       headers: {
         'content-type': 'application/json;charset=utf-8',
-        'x-powered-by': 'Nuxt'
-      }
+        'x-powered-by': 'Nuxt',
+      },
     } satisfies RenderResponse
     if (import.meta.prerender) {
       await islandCache!.setItem(`/__nuxt_island/${islandContext!.name}_${islandContext!.id}.json`, response)
@@ -517,6 +517,23 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
     return response
   }
 
+  // Create render context
+  const htmlContext: NuxtRenderHTMLContext = {
+    island: isRenderingIsland,
+    htmlAttrs: htmlAttrs ? [htmlAttrs] : [],
+    head: normalizeChunks([headTags]),
+    bodyAttrs: bodyAttrs ? [bodyAttrs] : [],
+    bodyPrepend: normalizeChunks([bodyTagsOpen, ssrContext.teleports?.body]),
+    body: [
+      componentIslands ? replaceIslandTeleports(ssrContext, _rendered.html) : _rendered.html,
+      APP_TELEPORT_OPEN_TAG + (HAS_APP_TELEPORTS ? joinTags([ssrContext.teleports?.[`#${appTeleportAttrs.id}`]]) : '') + APP_TELEPORT_CLOSE_TAG,
+    ],
+    bodyAppend: [bodyTags],
+  }
+
+  // Allow hooking into the rendered result
+  await nitroApp.hooks.callHook('render:html', htmlContext, { event })
+
   // Construct HTML response
   const response = {
     body: renderHTMLDocument(htmlContext),
@@ -524,8 +541,8 @@ export default defineRenderHandler(async (event): Promise<Partial<RenderResponse
     statusMessage: getResponseStatusText(event),
     headers: {
       'content-type': 'text/html;charset=utf-8',
-      'x-powered-by': 'Nuxt'
-    }
+      'x-powered-by': 'Nuxt',
+    },
   } satisfies RenderResponse
 
   return response
@@ -566,7 +583,7 @@ async function renderInlineStyles (usedModules: Set<string> | string[]): Promise
   const styleMap = await getSSRStyles()
   const inlinedStyles = new Set<string>()
   for (const mod of usedModules) {
-    if (mod in styleMap) {
+    if (mod in styleMap && styleMap[mod]) {
       for (const style of await styleMap[mod]()) {
         inlinedStyles.add(style)
       }
@@ -584,45 +601,56 @@ function renderPayloadResponse (ssrContext: NuxtSSRContext) {
     statusMessage: getResponseStatusText(ssrContext.event),
     headers: {
       'content-type': process.env.NUXT_JSON_PAYLOADS ? 'application/json;charset=utf-8' : 'text/javascript;charset=utf-8',
-      'x-powered-by': 'Nuxt'
-    }
+      'x-powered-by': 'Nuxt',
+    },
   } satisfies RenderResponse
 }
 
-function renderPayloadJsonScript (opts: { id: string, ssrContext: NuxtSSRContext, data?: any, src?: string }): Script[] {
+function renderPayloadJsonScript (opts: { ssrContext: NuxtSSRContext, data?: any, src?: string }): Script[] {
   const contents = opts.data ? stringify(opts.data, opts.ssrContext._payloadReducers) : ''
   const payload: Script = {
-    type: 'application/json',
-    id: opts.id,
-    innerHTML: contents,
-    'data-ssr': !(process.env.NUXT_NO_SSR || opts.ssrContext.noSSR)
+    'type': 'application/json',
+    'innerHTML': contents,
+    'data-nuxt-data': appId,
+    'data-ssr': !(process.env.NUXT_NO_SSR || opts.ssrContext.noSSR),
+  }
+  if (!multiApp) {
+    payload.id = '__NUXT_DATA__'
   }
   if (opts.src) {
     payload['data-src'] = opts.src
   }
+  const config = uneval(opts.ssrContext.config)
   return [
     payload,
     {
-      innerHTML: `window.__NUXT__={};window.__NUXT__.config=${uneval(opts.ssrContext.config)}`
-    }
+      innerHTML: multiApp
+        ? `window.__NUXT__=window.__NUXT__||{};window.__NUXT__[${JSON.stringify(appId)}]={config:${config}}`
+        : `window.__NUXT__={};window.__NUXT__.config=${config}`,
+    },
   ]
 }
 
 function renderPayloadScript (opts: { ssrContext: NuxtSSRContext, data?: any, src?: string }): Script[] {
   opts.data.config = opts.ssrContext.config
   const _PAYLOAD_EXTRACTION = import.meta.prerender && process.env.NUXT_PAYLOAD_EXTRACTION && !opts.ssrContext.noSSR
+  const nuxtData = devalue(opts.data)
   if (_PAYLOAD_EXTRACTION) {
+    const singleAppPayload = `import p from "${opts.src}";window.__NUXT__={...p,...(${nuxtData})}`
+    const multiAppPayload = `import p from "${opts.src}";window.__NUXT__=window.__NUXT__||{};window.__NUXT__[${JSON.stringify(appId)}]={...p,...(${nuxtData})}`
     return [
       {
         type: 'module',
-        innerHTML: `import p from "${opts.src}";window.__NUXT__={...p,...(${devalue(opts.data)})}`
-      }
+        innerHTML: multiApp ? multiAppPayload : singleAppPayload,
+      },
     ]
   }
+  const singleAppPayload = `window.__NUXT__=${nuxtData}`
+  const multiAppPayload = `window.__NUXT__=window.__NUXT__||{};window.__NUXT__[${JSON.stringify(appId)}]=${nuxtData}`
   return [
     {
-      innerHTML: `window.__NUXT__=${devalue(opts.data)}`
-    }
+      innerHTML: multiApp ? multiAppPayload : singleAppPayload,
+    },
   ]
 }
 
@@ -630,44 +658,45 @@ function splitPayload (ssrContext: NuxtSSRContext) {
   const { data, prerenderedAt, ...initial } = ssrContext.payload
   return {
     initial: { ...initial, prerenderedAt },
-    payload: { data, prerenderedAt }
+    payload: { data, prerenderedAt },
   }
 }
 
 /**
  * remove the root node from the html body
  */
-function getServerComponentHTML (body: string[]): string {
-  const match = body[0].match(ROOT_NODE_REGEX)
-  return match ? match[1] : body[0]
+function getServerComponentHTML (body: string): string {
+  const match = body.match(ROOT_NODE_REGEX)
+  return match?.[1] || body
 }
 
 const SSR_SLOT_TELEPORT_MARKER = /^uid=([^;]*);slot=(.*)$/
 const SSR_CLIENT_TELEPORT_MARKER = /^uid=([^;]*);client=(.*)$/
-const SSR_CLIENT_SLOT_MARKER = /^island-slot=(?:[^;]*);(.*)$/
+const SSR_CLIENT_SLOT_MARKER = /^island-slot=[^;]*;(.*)$/
 
 function getSlotIslandResponse (ssrContext: NuxtSSRContext): NuxtIslandResponse['slots'] {
-  if (!ssrContext.islandContext) { return {} }
+  if (!ssrContext.islandContext || !Object.keys(ssrContext.islandContext.slots).length) { return undefined }
   const response: NuxtIslandResponse['slots'] = {}
-  for (const slot in ssrContext.islandContext.slots) {
-    response[slot] = {
-      ...ssrContext.islandContext.slots[slot],
-      fallback: ssrContext.teleports?.[`island-fallback=${slot}`]
+  for (const [name, slot] of Object.entries(ssrContext.islandContext.slots)) {
+    response[name] = {
+      ...slot,
+      fallback: ssrContext.teleports?.[`island-fallback=${name}`],
     }
   }
   return response
 }
 
 function getClientIslandResponse (ssrContext: NuxtSSRContext): NuxtIslandResponse['components'] {
-  if (!ssrContext.islandContext) { return {} }
+  if (!ssrContext.islandContext || !Object.keys(ssrContext.islandContext.components).length) { return undefined }
   const response: NuxtIslandResponse['components'] = {}
 
-  for (const clientUid in ssrContext.islandContext.components) {
-    const html = ssrContext.teleports?.[clientUid] || ''
+  for (const [clientUid, component] of Object.entries(ssrContext.islandContext.components)) {
+    // remove teleport anchor to avoid hydration issues
+    const html = ssrContext.teleports?.[clientUid]?.replaceAll('<!--teleport start anchor-->', '') || ''
     response[clientUid] = {
-      ...ssrContext.islandContext.components[clientUid],
+      ...component,
       html,
-      slots: getComponentSlotTeleport(ssrContext.teleports ?? {})
+      slots: getComponentSlotTeleport(ssrContext.teleports ?? {}),
     }
   }
   return response
@@ -697,7 +726,7 @@ function replaceIslandTeleports (ssrContext: NuxtSSRContext, html: string) {
     if (matchClientComp) {
       const [, uid, clientId] = matchClientComp
       if (!uid || !clientId) { continue }
-      html = html.replace(new RegExp(` data-island-component="${clientId}"[^>]*>`), (full) => {
+      html = html.replace(new RegExp(` data-island-uid="${uid}" data-island-component="${clientId}"[^>]*>`), (full) => {
         return full + teleports[key]
       })
       continue
