@@ -36,10 +36,16 @@ export interface NuxtTemplate<Options = TemplateDefaultOptions> {
   /** The resolved path to the source file to be template */
   src?: string
   /** Provided compile option instead of src */
-  // eslint-disable-next-line no-use-before-define
+
   getContents?: (data: { nuxt: Nuxt, app: NuxtApp, options: Options }) => string | Promise<string>
   /** Write to filesystem */
   write?: boolean
+}
+
+export interface NuxtServerTemplate {
+  /** The target filename once the template is copied into the Nuxt buildDir */
+  filename: string
+  getContents: () => string | Promise<string>
 }
 
 export interface ResolvedNuxtTemplate<Options = TemplateDefaultOptions> extends NuxtTemplate<Options> {
@@ -54,6 +60,7 @@ export interface NuxtTypeTemplate<Options = TemplateDefaultOptions> extends Omit
 }
 
 type _TemplatePlugin<Options> = Omit<NuxtPlugin, 'src'> & NuxtTemplate<Options>
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface NuxtPluginTemplate<Options = TemplateDefaultOptions> extends _TemplatePlugin<Options> { }
 
 export interface NuxtApp {
@@ -75,7 +82,7 @@ export interface Nuxt {
   // Private fields.
   _version: string
   _ignore?: Ignore
-  _ignorePatterns?: string[]
+  _dependencies?: Set<string>
 
   /** The resolved Nuxt configuration. */
   options: NuxtOptions
