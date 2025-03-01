@@ -44,6 +44,9 @@ coverage
 # Intellij idea
 *.iml
 .idea
+!.idea/nuxt.iml
+!.idea/modules.xml
+!.idea/inspectionProfiles/Project_Default.xml
 
 # OSX
 .DS_Store
@@ -73,3 +76,5 @@ Temporary Items
 
 fixtures-temp
 .pnpm-store
+eslint-typegen.d.ts
+.eslintcache
