@@ -9,17 +9,18 @@ import { NuxtTeleportIslandSymbol } from './nuxt-teleport-island-component'
 /* @__PURE__ */
 export default defineComponent({
   name: 'NuxtTeleportIslandSlot',
+  inheritAttrs: false,
   props: {
     name: {
       type: String,
-      required: true
+      required: true,
     },
     /**
      * must be an array to handle v-for
      */
     props: {
-      type: Object as () => Array<any>
-    }
+      type: Object as () => Array<any>,
+    },
   },
   setup (props, { slots }) {
     const nuxtApp = useNuxtApp()
@@ -30,7 +31,7 @@ export default defineComponent({
 
     const componentName = inject(NuxtTeleportIslandSymbol, false)
     islandContext.slots[props.name] = {
-      props: (props.props || []) as unknown[]
+      props: (props.props || []) as unknown[],
     }
 
     return () => {
@@ -38,18 +39,18 @@ export default defineComponent({
 
       if (nuxtApp.ssrContext?.islandContext && slots.default) {
         vnodes.push(h('div', {
-          style: 'display: contents;',
+          'style': 'display: contents;',
           'data-island-uid': '',
-          'data-island-slot': props.name
+          'data-island-slot': props.name,
         }, {
           // Teleport in slot to not be hydrated client-side with the staticVNode
-          default: () => [createVNode(Teleport, { to: `island-slot=${componentName};${props.name}` }, slots.default?.())]
+          default: () => [createVNode(Teleport, { to: `island-slot=${componentName};${props.name}` }, slots.default?.())],
         }))
       } else {
         vnodes.push(h('div', {
-          style: 'display: contents;',
+          'style': 'display: contents;',
           'data-island-uid': '',
-          'data-island-slot': props.name
+          'data-island-slot': props.name,
         }))
       }
 
@@ -59,5 +60,5 @@ export default defineComponent({
 
       return vnodes
     }
-  }
+  },
 })
