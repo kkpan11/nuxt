@@ -10,7 +10,7 @@ interface DevOnlyPluginOptions {
 const DEVONLY_COMP_SINGLE_RE = /<(?:dev-only|DevOnly|lazy-dev-only|LazyDevOnly)>[\s\S]*?<\/(?:dev-only|DevOnly|lazy-dev-only|LazyDevOnly)>/
 const DEVONLY_COMP_RE = /<(?:dev-only|DevOnly|lazy-dev-only|LazyDevOnly)>[\s\S]*?<\/(?:dev-only|DevOnly|lazy-dev-only|LazyDevOnly)>/g
 
-export const DevOnlyPlugin = createUnplugin((options: DevOnlyPluginOptions) => {
+export const DevOnlyPlugin = (options: DevOnlyPluginOptions) => createUnplugin(() => {
   return {
     name: 'nuxt:server-devonly:transform',
     enforce: 'pre',
@@ -33,9 +33,9 @@ export const DevOnlyPlugin = createUnplugin((options: DevOnlyPluginOptions) => {
           code: s.toString(),
           map: options.sourcemap
             ? s.generateMap({ hires: true })
-            : undefined
+            : undefined,
         }
       }
-    }
+    },
   }
 })
