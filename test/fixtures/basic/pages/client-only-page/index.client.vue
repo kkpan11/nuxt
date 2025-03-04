@@ -1,4 +1,10 @@
 <script setup lang="ts">
+definePageMeta({
+  // Disable page transition for this page to avoid having multiple time the same page during transition
+  pageTransition: false,
+  layoutTransition: false,
+})
+
 const state = useState('test', () => {
   let hasAccessToWindow = null as null | boolean
 
@@ -10,7 +16,7 @@ const state = useState('test', () => {
 
   return {
     hasAccessToWindow,
-    isServer: import.meta.server
+    isServer: import.meta.server,
   }
 })
 

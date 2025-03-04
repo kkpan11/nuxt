@@ -10,9 +10,31 @@ interface Preview {
   _initialized?: boolean
 }
 
+/**
+ * Options for configuring preview mode.
+ */
 interface PreviewModeOptions<S> {
-  shouldEnable?: (state: Preview['state']) => boolean,
-  getState?: (state: Preview['state']) => S,
+  /**
+   * A function that determines whether preview mode should be enabled based on the current state.
+   * @param {Record<any, unknown>} state - The state of the preview.
+   * @returns {boolean} A boolean indicating whether the preview mode is enabled.
+   */
+  shouldEnable?: (state: Preview['state']) => boolean
+  /**
+   * A function that retrieves the current state.
+   * The `getState` function will append returned values to current state, so be careful not to accidentally overwrite important state.
+   * @param {Record<any, unknown>} state - The preview state.
+   * @returns {Record<any, unknown>} The preview state.
+   */
+  getState?: (state: Preview['state']) => S
+  /**
+   * A function to be called when the preview mode is enabled.
+   */
+  onEnable?: () => void
+  /**
+   * A function to be called when the preview mode is disabled.
+   */
+  onDisable?: () => void
 }
 
 type EnteredState = Record<any, unknown> | null | undefined | void
@@ -23,13 +45,13 @@ let unregisterRefreshHook: (() => any) | undefined
 export function usePreviewMode<S extends EnteredState> (options: PreviewModeOptions<S> = {}) {
   const preview = useState<Preview>('_preview-state', () => ({
     enabled: false,
-    state: {}
+    state: {},
   }))
 
   if (preview.value._initialized) {
     return {
       enabled: toRef(preview.value, 'enabled'),
-      state: preview.value.state as S extends void ? Preview['state'] : (NonNullable<S> & Preview['state'])
+      state: preview.value.state as S extends void ? Preview['state'] : (NonNullable<S> & Preview['state']),
     }
   }
 
@@ -54,9 +76,10 @@ export function usePreviewMode<S extends EnteredState> (options: PreviewModeOpti
       }
 
       if (import.meta.client && !unregisterRefreshHook) {
-        refreshNuxtData()
+        const onEnable = options.onEnable ?? refreshNuxtData
+        onEnable()
 
-        unregisterRefreshHook = useRouter().afterEach(() => refreshNuxtData())
+        unregisterRefreshHook = options.onDisable ?? useRouter().afterEach(() => refreshNuxtData())
       }
     } else if (unregisterRefreshHook) {
       unregisterRefreshHook()
@@ -67,7 +90,7 @@ export function usePreviewMode<S extends EnteredState> (options: PreviewModeOpti
 
   return {
     enabled: toRef(preview.value, 'enabled'),
-    state: preview.value.state as S extends void ? Preview['state'] : (NonNullable<S> & Preview['state'])
+    state: preview.value.state as S extends void ? Preview['state'] : (NonNullable<S> & Preview['state']),
   }
 }
 

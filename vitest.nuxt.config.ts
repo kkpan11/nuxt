@@ -4,25 +4,29 @@ export default defineVitestConfig({
   test: {
     dir: './test/nuxt',
     coverage: {
-      include: ['packages/nuxt/src/app']
+      include: ['packages/nuxt/src/app'],
     },
     environment: 'nuxt',
     setupFiles: [
-      './test/setup-runtime.ts'
+      './test/setup-runtime.ts',
     ],
     environmentOptions: {
       nuxt: {
         overrides: {
-          experimental: {
-            appManifest: process.env.TEST_MANIFEST !== 'manifest-off'
+          pages: true,
+          routeRules: {
+            '/specific-prerendered': { prerender: true },
+            '/pre/test': { redirect: '/' },
+            '/pre/**': { prerender: true },
           },
-          appConfig: {
-            nuxt: {
-              buildId: 'override'
-            }
-          }
-        }
-      }
-    }
-  }
+          experimental: {
+            appManifest: process.env.TEST_MANIFEST !== 'manifest-off',
+          },
+          imports: {
+            polyfills: false,
+          },
+        },
+      },
+    },
+  },
 })
