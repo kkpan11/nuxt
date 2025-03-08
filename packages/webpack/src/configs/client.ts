@@ -1,6 +1,5 @@
 import querystring from 'node:querystring'
 import { resolve } from 'pathe'
-import webpack from 'webpack'
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer'
 import { logger } from '@nuxt/kit'
 import { joinURL } from 'ufo'
@@ -10,19 +9,20 @@ import { env, nodeless } from 'unenv'
 import type { WebpackConfigContext } from '../utils/config'
 import { applyPresets } from '../utils/config'
 import { nuxt } from '../presets/nuxt'
+import { webpack } from '#builder'
 
-export function client (ctx: WebpackConfigContext) {
+export async function client (ctx: WebpackConfigContext) {
   ctx.name = 'client'
   ctx.isClient = true
 
-  applyPresets(ctx, [
+  await applyPresets(ctx, [
     nuxt,
     clientPlugins,
     clientOptimization,
     clientDevtool,
     clientPerformance,
     clientHMR,
-    clientNodeCompat
+    clientNodeCompat,
   ])
 }
 
@@ -46,7 +46,7 @@ function clientPerformance (ctx: WebpackConfigContext) {
   ctx.config.performance = {
     maxEntrypointSize: 1000 * 1024,
     hints: ctx.isDev ? false : 'warning',
-    ...ctx.config.performance
+    ...ctx.config.performance,
   }
 }
 
@@ -56,10 +56,10 @@ function clientNodeCompat (ctx: WebpackConfigContext) {
   }
   ctx.config.plugins!.push(new webpack.DefinePlugin({ global: 'globalThis' }))
 
-  ctx.config.resolve = ctx.config.resolve || {}
+  ctx.config.resolve ||= {}
   ctx.config.resolve.fallback = {
     ...env(nodeless).alias,
-    ...ctx.config.resolve.fallback
+    ...ctx.config.resolve.fallback,
   }
 
   // https://github.com/webpack/webpack/issues/13290#issuecomment-1188760779
@@ -81,7 +81,7 @@ function clientHMR (ctx: WebpackConfigContext) {
     ...clientOptions,
     ansiColors: JSON.stringify(clientOptions.ansiColors || {}),
     overlayStyles: JSON.stringify(clientOptions.overlayStyles || {}),
-    name: ctx.name
+    name: ctx.name,
   }
   const hotMiddlewareClientOptionsStr = querystring.stringify(hotMiddlewareClientOptions)
 
@@ -89,10 +89,10 @@ function clientHMR (ctx: WebpackConfigContext) {
   const app = (ctx.config.entry as any).app as any
   app.unshift(
     // https://github.com/glenjamin/webpack-hot-middleware#config
-    `webpack-hot-middleware/client?${hotMiddlewareClientOptionsStr}`
+    `webpack-hot-middleware/client?${hotMiddlewareClientOptionsStr}`,
   )
 
-  ctx.config.plugins = ctx.config.plugins || []
+  ctx.config.plugins ||= []
   ctx.config.plugins.push(new webpack.HotModuleReplacementPlugin())
 }
 
@@ -113,7 +113,7 @@ function clientPlugins (ctx: WebpackConfigContext) {
       openAnalyzer: true,
       reportFilename: resolve(statsDir, `${ctx.name}.html`),
       statsFilename: resolve(statsDir, `${ctx.name}.json`),
-      ...ctx.userConfig.analyze === true ? {} : ctx.userConfig.analyze
+      ...ctx.userConfig.analyze === true ? {} : ctx.userConfig.analyze,
     }))
   }
 
@@ -122,7 +122,7 @@ function clientPlugins (ctx: WebpackConfigContext) {
   if (!ctx.nuxt.options.ssr) {
     if (!ctx.nuxt.options.test && (ctx.nuxt.options.typescript.typeCheck === true || (ctx.nuxt.options.typescript.typeCheck === 'build' && !ctx.nuxt.options.dev))) {
       ctx.config.plugins!.push(new ForkTSCheckerWebpackPlugin({
-        logger
+        logger,
       }))
     }
   }
