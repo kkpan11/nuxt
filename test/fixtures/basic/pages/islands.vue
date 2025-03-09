@@ -2,8 +2,8 @@
 const islandProps = ref({
   bool: true,
   number: 100,
-  str: 'helo world',
-  obj: { json: 'works' }
+  str: 'hello world',
+  obj: { json: 'works' },
 })
 
 const showIslandSlot = ref(false)
@@ -109,7 +109,7 @@ const count = ref(0)
         </NuxtIsland>
       </div>
     </div>
-    <ServerWithClient />
+    <server-with-client />
     <ServerWithNestedClient />
   </div>
 </template>
