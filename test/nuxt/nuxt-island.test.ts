@@ -1,9 +1,10 @@
-import { beforeEach } from 'node:test'
-import { describe, expect, it, vi } from 'vitest'
-import { h, nextTick } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, h, nextTick, popScopeId, pushScopeId } from 'vue'
+import { serve } from 'srvx'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { getPort } from 'get-port-please'
+
 import { createServerComponent } from '../../packages/nuxt/src/components/runtime/server-component'
-import { createSimpleRemoteIslandProvider } from '../fixtures/remote-provider'
 import NuxtIsland from '../../packages/nuxt/src/app/components/nuxt-island'
 
 vi.mock('#build/nuxt.config.mjs', async (original) => {
@@ -11,7 +12,7 @@ vi.mock('#build/nuxt.config.mjs', async (original) => {
     // @ts-expect-error virtual file
     ...(await original()),
     remoteComponentIslands: true,
-    selectiveClient: true
+    selectiveClient: true,
   }
 })
 
@@ -19,7 +20,7 @@ vi.mock('vue', async (original) => {
   const vue = await original<typeof import('vue')>()
   return {
     ...vue,
-    h: vi.fn(vue.h)
+    h: vi.fn(vue.h),
   }
 })
 
@@ -31,27 +32,27 @@ function expectNoConsoleIssue () {
   expect(consoleWarn).not.toHaveBeenCalled()
 }
 
-beforeEach(() => {
-  consoleError.mockClear()
-  consoleWarn.mockClear()
-})
-
 describe('runtime server component', () => {
-  it('expect no data-v- attrbutes #23051', () => {
+  beforeEach(() => {
+    consoleError.mockClear()
+    consoleWarn.mockClear()
+  })
+
+  it('expect no data-v- attributes #23051', () => {
     // @ts-expect-error mock
     vi.mocked(h).mockImplementation(() => null)
 
     // @ts-expect-error test setup
     createServerComponent('DummyName').setup!({
-      lazy: false
+      lazy: false,
     }, {
       attrs: {
         'data-v-123': '',
-        test: 1
+        'test': 1,
       },
       slots: {},
       emit: vi.fn(),
-      expose: vi.fn()
+      expose: vi.fn(),
     })()
 
     expect(h).toHaveBeenCalledOnce()
@@ -67,13 +68,25 @@ describe('runtime server component', () => {
   })
 
   it('expect remote island to be rendered', async () => {
-    const server = createSimpleRemoteIslandProvider()
+    const port = await getPort({ host: 'localhost', public: false, random: true })
+    const server = serve({
+      port,
+      fetch () {
+        return new Response(JSON.stringify({
+          html: '<div>hello world from another server</div>',
+          state: {},
+          head: { link: [], style: [] },
+        }), { headers: { 'Content-Type': 'application/json' } })
+      },
+    })
+
+    await server.ready()
 
     const wrapper = await mountSuspended(NuxtIsland, {
       props: {
         name: 'Test',
-        source: 'http://localhost:3001'
-      }
+        source: `http://localhost:${port}`,
+      },
     })
 
     expect(wrapper.html()).toMatchInlineSnapshot('"<div>hello world from another server</div>"')
@@ -91,11 +104,11 @@ describe('runtime server component', () => {
         state: {},
         head: {
           link: [],
-          style: []
+          style: [],
         },
         json () {
           return this
-        }
+        },
       }
     })
     vi.stubGlobal('fetch', stubFetch)
@@ -123,15 +136,28 @@ describe('runtime server component', () => {
       props: {
         name: 'Error',
         props: {
-          force: true
-        }
+          force: true,
+        },
       },
-      attachTo: 'body'
+      attachTo: 'body',
     })
 
     expect(fetch).toHaveBeenCalledOnce()
     expect(wrapper.emitted('error')).toHaveLength(1)
     vi.mocked(fetch).mockReset()
+  })
+
+  it('expect NuxtIsland to have parent scopeId', async () => {
+    const wrapper = await mountSuspended(defineComponent({
+      render () {
+        pushScopeId('data-v-654e2b21')
+        const vnode = h(createServerComponent('dummyName'))
+        popScopeId()
+        return vnode
+      },
+    }))
+
+    expect(wrapper.find('*').attributes()).toHaveProperty('data-v-654e2b21')
   })
 })
 
@@ -145,8 +171,8 @@ describe('client components', () => {
         name: 'ClientComponent',
         setup () {
           return () => h('div', 'client component')
-        }
-      }
+        },
+      },
     }))
 
     const stubFetch = vi.fn(() => {
@@ -156,18 +182,18 @@ describe('client components', () => {
         state: {},
         head: {
           link: [],
-          style: []
+          style: [],
         },
         components: {
           [componentId]: {
             html: '<div>fallback</div>',
             props: {},
-            chunk: mockPath
-          }
+            chunk: mockPath,
+          },
         },
         json () {
           return this
-        }
+        },
       }
     })
 
@@ -177,16 +203,16 @@ describe('client components', () => {
       props: {
         name: 'NuxtClient',
         props: {
-          force: true
-        }
+          force: true,
+        },
       },
-      attachTo: 'body'
+      attachTo: 'body',
     })
 
     expect(fetch).toHaveBeenCalledOnce()
 
     expect(wrapper.html()).toMatchInlineSnapshot(`
-      "<div data-island-uid="4">hello<div data-island-uid="4" data-island-component="Client-12345">
+      "<div data-island-uid="5">hello<div data-island-uid="5" data-island-component="Client-12345">
           <div>client component</div>
         </div>
       </div>
@@ -201,18 +227,18 @@ describe('client components', () => {
       state: {},
       head: {
         link: [],
-        style: []
+        style: [],
       },
       components: {},
       json () {
         return this
-      }
+      },
     }))
 
     await wrapper.vm.$.exposed!.refresh()
     await nextTick()
     expect(wrapper.html()).toMatchInlineSnapshot(`
-      "<div data-island-uid="4">hello<div>
+      "<div data-island-uid="5">hello<div>
           <div>fallback</div>
         </div>
       </div>"
@@ -232,11 +258,11 @@ describe('client components', () => {
         state: {},
         head: {
           link: [],
-          style: []
+          style: [],
         },
         json () {
           return this
-        }
+        },
       }
     })
 
@@ -246,10 +272,10 @@ describe('client components', () => {
       props: {
         name: 'WithNestedClient',
         props: {
-          force: true
-        }
+          force: true,
+        },
       },
-      attachTo: 'body'
+      attachTo: 'body',
     })
 
     expect(fetch).toHaveBeenCalledOnce()
@@ -263,12 +289,12 @@ describe('client components', () => {
     const componentId = 'ClientWithSlot-12345'
 
     vi.doMock(mockPath, () => ({
-      default: {
+      default: defineComponent({
         name: 'ClientWithSlot',
         setup (_, { slots }) {
-          return () => h('div', { class: 'client-component' }, slots.default())
-        }
-      }
+          return () => h('div', { class: 'client-component' }, slots.default?.())
+        },
+      }),
     }))
 
     const stubFetch = vi.fn(() => {
@@ -278,7 +304,7 @@ describe('client components', () => {
         state: {},
         head: {
           link: [],
-          style: []
+          style: [],
         },
         components: {
           [componentId]: {
@@ -286,26 +312,26 @@ describe('client components', () => {
             props: {},
             chunk: mockPath,
             slots: {
-              default: '<div>slot in client component</div>'
-            }
-          }
+              default: '<div>slot in client component</div>',
+            },
+          },
         },
         json () {
           return this
-        }
+        },
       }
     })
 
     vi.stubGlobal('fetch', stubFetch)
     const wrapper = await mountSuspended(NuxtIsland, {
       props: {
-        name: 'NuxtClientWithSlot'
+        name: 'NuxtClientWithSlot',
       },
-      attachTo: 'body'
+      attachTo: 'body',
     })
     expect(fetch).toHaveBeenCalledOnce()
     expect(wrapper.html()).toMatchInlineSnapshot(`
-      "<div data-island-uid="6">hello<div data-island-uid="6" data-island-component="ClientWithSlot-12345">
+      "<div data-island-uid="7">hello<div data-island-uid="7" data-island-component="ClientWithSlot-12345">
           <div class="client-component">
             <div style="display: contents" data-island-uid="" data-island-slot="default">
               <div>slot in client component</div>
