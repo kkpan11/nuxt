@@ -4,7 +4,7 @@ description: 'Access runtime config variables with the useRuntimeConfig composab
 links:
   - label: Source
     icon: i-simple-icons-github
-    to: https://github.com/nuxt/nuxt/blob/main/packages/nuxt/src/app/composables/asyncData.ts
+    to: https://github.com/nuxt/nuxt/blob/main/packages/nuxt/src/app/nuxt.ts
     size: xs
 ---
 
@@ -82,7 +82,7 @@ It is possible to update runtime config values using a matching environment vari
 
 We can set the environment variables inside the `.env` file to make them accessible during **development** and **build/generate**.
 
-``` [.env]
+```ini [.env]
 NUXT_PUBLIC_API_BASE = "https://api.localhost:5555"
 NUXT_API_SECRET = "123"
 ```
