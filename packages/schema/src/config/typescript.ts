@@ -24,9 +24,9 @@ export default defineResolvers({
      */
     builder: {
       $resolve: (val) => {
-        const validBuilderTypes = ['vite', 'webpack', 'rspack', 'shared'] as const
-        type ValidBuilderType = typeof validBuilderTypes[number]
-        if (typeof val === 'string' && validBuilderTypes.includes(val as ValidBuilderType)) {
+        const validBuilderTypes = new Set(['vite', 'webpack', 'rspack', 'shared'] as const)
+        type ValidBuilderType = typeof validBuilderTypes extends Set<infer Option> ? Option : never
+        if (typeof val === 'string' && validBuilderTypes.has(val as ValidBuilderType)) {
           return val as ValidBuilderType
         }
         if (val === false) {
@@ -46,6 +46,10 @@ export default defineResolvers({
           // Nitro auto-imported/augmented dependencies
           'nitro/types',
           'nitro/runtime',
+          // TODO: remove in v5
+          'nitropack/types',
+          'nitropack/runtime',
+          'nitropack',
           'defu',
           'h3',
           'consola',

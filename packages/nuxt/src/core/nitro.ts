@@ -4,8 +4,8 @@ import { cpus } from 'node:os'
 import { join, relative, resolve } from 'pathe'
 import { createRouter as createRadixRouter, exportMatcher, toRouteMatcher } from 'radix3'
 import { joinURL, withTrailingSlash } from 'ufo'
-import { build, copyPublicAssets, createDevServer, createNitro, prepare, prerender, writeTypes } from 'nitro'
-import type { Nitro, NitroConfig, NitroOptions } from 'nitro/types'
+import { build, copyPublicAssets, createDevServer, createNitro, prepare, prerender, writeTypes } from 'nitropack'
+import type { Nitro, NitroConfig, NitroOptions } from 'nitropack/types'
 import { createIsIgnored, findPath, logger, resolveAlias, resolveIgnorePatterns, resolveNuxtModule } from '@nuxt/kit'
 import escapeRE from 'escape-string-regexp'
 import { defu } from 'defu'
@@ -129,6 +129,10 @@ export async function initNitro (nuxt: Nuxt & { _nitro?: Nitro }) {
     routeRules: {
       '/__nuxt_error': { cache: false },
     },
+    appConfig: nuxt.options.appConfig,
+    appConfigFiles: nuxt.options._layers.map(
+      layer => resolve(layer.config.srcDir, 'app.config'),
+    ),
     typescript: {
       strict: true,
       generateTsConfig: true,
@@ -241,6 +245,7 @@ export async function initNitro (nuxt: Nuxt & { _nitro?: Nitro }) {
     nitroConfig.imports.imports.push({
       name: 'useAppConfig',
       from: resolve(distDir, 'core/runtime/nitro/utils/app-config'),
+      priority: -1,
     })
   }
 
@@ -333,13 +338,14 @@ export async function initNitro (nuxt: Nuxt & { _nitro?: Nitro }) {
       nitro.hooks.hook('rollup:before', async (nitro) => {
         const routeRules = {} as Record<string, any>
         const _routeRules = nitro.options.routeRules
+        const validManifestKeys = new Set(['prerender', 'redirect', 'appMiddleware'])
         for (const key in _routeRules) {
           if (key === '/__nuxt_error') { continue }
           let hasRules = false
           const filteredRules = {} as Record<string, any>
           for (const routeKey in _routeRules[key]) {
             const value = (_routeRules as any)[key][routeKey]
-            if (['prerender', 'redirect', 'appMiddleware'].includes(routeKey) && value) {
+            if (value && validManifestKeys.has(routeKey)) {
               if (routeKey === 'redirect') {
                 filteredRules[routeKey] = typeof value === 'string' ? value : value.to
               } else {
